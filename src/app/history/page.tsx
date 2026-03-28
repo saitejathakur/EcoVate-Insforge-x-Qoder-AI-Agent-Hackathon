@@ -1,0 +1,305 @@
+/**
+ * History Page
+ * 
+ * View all scanned products and DIY projects (pending and approved).
+ */
+
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { auth } from '@/lib/insforge';
+
+interface Scan {
+  id: string;
+  product_name: string;
+  materials: string[];
+  carbon_footprint: number | null;
+  recyclability_score: number | null;
+  image_url: string | null;
+  created_at: string;
+}
+
+interface UserAction {
+  id: string;
+  scan_id: string | null;
+  action_type: string;
+  impact_score: number;
+  image_url: string | null;
+  created_at: string;
+}
+
+interface HistoryData {
+  scans: Scan[];
+  actions: UserAction[];
+  totalImpact: number;
+}
+
+export default function HistoryPage() {
+  const router = useRouter();
+  const [data, setData] = useState<HistoryData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'scans' | 'projects'>('projects');
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const fetchHistory = async () => {
+    try {
+      const { data: userData, error } = await auth.getCurrentUser();
+      if (error || !userData?.user) {
+        router.push('/login');
+        return;
+      }
+
+      const response = await fetch('/api/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: userData.user.id }),
+      });
+      
+      const result = await response.json();
+      console.log('Dashboard data:', result);
+      setData({
+        scans: result.recentScans || [],
+        actions: result.recentActions || [],
+        totalImpact: result.stats?.totalImpact || 0,
+      });
+    } catch (e) {
+      console.error('Failed to fetch history:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100">
+        <div className="animate-spin w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  // Separate projects by status
+  const pendingProjects = data?.actions.filter(a => a.action_type === 'diy_pending') || [];
+  const completedProjects = data?.actions.filter(a => a.action_type === 'diy_completed') || [];
+  const allProjects = [...pendingProjects, ...completedProjects].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 pb-6">
+      {/* Header */}
+      <header className="bg-white shadow-sm">
+        <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center">
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="flex items-center text-gray-600 hover:text-gray-900"
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+            <h1 className="ml-4 font-bold text-gray-900 text-lg">My History</h1>
+          </div>
+          <button
+            onClick={fetchHistory}
+            className="p-2 text-gray-500 hover:text-green-600"
+            title="Refresh"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="max-w-md mx-auto px-4 py-4">
+        <div className="flex bg-white rounded-xl p-1 shadow">
+          <button
+            onClick={() => setActiveTab('projects')}
+            className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+              activeTab === 'projects'
+                ? 'bg-green-500 text-white'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            Projects ({allProjects.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('scans')}
+            className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+              activeTab === 'scans'
+                ? 'bg-green-500 text-white'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            Scans ({data?.scans.length || 0})
+          </button>
+        </div>
+      </div>
+
+      {/* Status Legend */}
+      {activeTab === 'projects' && allProjects.length > 0 && (
+        <div className="max-w-md mx-auto px-4 mb-4">
+          <div className="flex items-center space-x-4 text-sm">
+            <div className="flex items-center">
+              <span className="w-3 h-3 bg-amber-400 rounded-full mr-2"></span>
+              <span className="text-gray-600">Pending ({pendingProjects.length})</span>
+            </div>
+            <div className="flex items-center">
+              <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+              <span className="text-gray-600">Approved ({completedProjects.length})</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Content */}
+      <main className="max-w-md mx-auto px-4">
+        {activeTab === 'scans' && (
+          <div className="space-y-3">
+            {data?.scans.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  </svg>
+                </div>
+                <p className="text-gray-500">No scans yet</p>
+                <button
+                  onClick={() => router.push('/scan')}
+                  className="mt-4 text-green-600 font-medium"
+                >
+                  Scan your first product →
+                </button>
+              </div>
+            ) : (
+              data?.scans.map((scan) => (
+                <div key={scan.id} className="bg-white rounded-xl shadow-lg p-4">
+                  <div className="flex items-start space-x-3">
+                    {scan.image_url ? (
+                      <img src={scan.image_url} alt="" className="w-16 h-16 rounded-lg object-cover" />
+                    ) : (
+                      <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-gray-900">{scan.product_name}</h3>
+                      <p className="text-sm text-gray-500 capitalize">{scan.materials?.join(', ') || 'Unknown materials'}</p>
+                      <div className="flex items-center mt-2 space-x-3">
+                        {scan.carbon_footprint !== null && (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                            {scan.carbon_footprint.toFixed(2)} kg CO₂
+                          </span>
+                        )}
+                        {scan.recyclability_score !== null && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                            {scan.recyclability_score}% recyclable
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-gray-400">
+                      {new Date(scan.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeTab === 'projects' && (
+          <div className="space-y-3">
+            {allProjects.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                </div>
+                <p className="text-gray-500">No projects yet</p>
+                <p className="text-gray-400 text-sm mt-2">Complete a DIY project to see it here</p>
+                <button
+                  onClick={() => router.push('/scan')}
+                  className="mt-4 text-green-600 font-medium"
+                >
+                  Start your first project →
+                </button>
+              </div>
+            ) : (
+              allProjects.map((action) => {
+                const isPending = action.action_type === 'diy_pending';
+                return (
+                  <div key={action.id} className={`bg-white rounded-xl shadow-lg p-4 border-l-4 ${
+                    isPending ? 'border-amber-400' : 'border-green-500'
+                  }`}>
+                    <div className="flex items-start space-x-3">
+                      {action.image_url ? (
+                        <img src={action.image_url} alt="" className="w-16 h-16 rounded-lg object-cover" />
+                      ) : (
+                        <div className={`w-16 h-16 rounded-lg flex items-center justify-center ${
+                          isPending ? 'bg-amber-100' : 'bg-green-100'
+                        }`}>
+                          {isPending ? (
+                            <svg className="w-6 h-6 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                          <h3 className="font-semibold text-gray-900">DIY Project</h3>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            isPending 
+                              ? 'bg-amber-100 text-amber-700' 
+                              : 'bg-green-100 text-green-700'
+                          }`}>
+                            {isPending ? 'Pending Review' : 'Approved'}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-500">
+                          {new Date(action.created_at).toLocaleDateString()}
+                        </p>
+                        {isPending && (
+                          <p className="text-xs text-amber-600 mt-1">
+                            Awaiting verification (need 85%+ confidence)
+                          </p>
+                        )}
+                      </div>
+                      {!isPending && action.impact_score > 0 && (
+                        <span className="text-green-600 font-bold">+{action.impact_score} pts</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Summary */}
+        <div className="mt-6 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl p-4 text-white">
+          <div className="flex items-center justify-between">
+            <span>Total Impact Score</span>
+            <span className="text-2xl font-bold">{data?.totalImpact || 0}</span>
+          </div>
+          <p className="text-green-100 text-sm mt-1">From {completedProjects.length} approved projects</p>
+        </div>
+      </main>
+    </div>
+  );
+}
